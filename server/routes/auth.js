@@ -5,6 +5,13 @@ const User = require("../models/User");
 
 const router = express.Router();
 
+const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+};
+
 router.post("/register", async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -17,7 +24,7 @@ router.post("/register", async (req, res) => {
         const user = await User.create({ username, password: hashedPassword });
 
         const token = jwt.sign({ id: user._id, username }, process.env.JWT_SECRET || "collabeditorsecret", { expiresIn: "7d" });
-        res.cookie("token", token, { httpOnly: true }).json({ success: true, username });
+        res.cookie("token", token, cookieOptions).json({ success: true, username });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -33,7 +40,7 @@ router.post("/login", async (req, res) => {
         if (!isMatch) return res.status(400).json({ error: "Invalid password" });
 
         const token = jwt.sign({ id: user._id, username }, process.env.JWT_SECRET || "collabeditorsecret", { expiresIn: "7d" });
-        res.cookie("token", token, { httpOnly: true }).json({ success: true, username });
+        res.cookie("token", token, cookieOptions).json({ success: true, username });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -51,7 +58,7 @@ router.get("/me", (req, res) => {
 });
 
 router.post("/logout", (req, res) => {
-    res.clearCookie("token").json({ success: true });
+    res.clearCookie("token", cookieOptions).json({ success: true });
 });
 
 module.exports = router;

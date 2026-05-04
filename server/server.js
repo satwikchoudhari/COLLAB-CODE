@@ -19,6 +19,7 @@ mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/collab-edit
 .catch((err) => console.error("MongoDB connection error:", err));
 
 const app = express();
+app.set("trust proxy", 1); // Trust Render's reverse proxy for secure cookies
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "../client")));
