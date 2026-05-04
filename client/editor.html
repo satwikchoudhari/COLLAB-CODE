@@ -187,6 +187,42 @@
         </div>
     </div>
 
+    <!-- Rename Modal -->
+    <div id="renameModal" class="file-modal-overlay" style="display:none;">
+        <div class="file-modal">
+            <h3 class="file-modal-title">Rename File</h3>
+            <input type="text" id="renameInput" class="form-control file-modal-input" placeholder="Enter new file name" autocomplete="off">
+            <div class="file-modal-actions">
+                <button id="renameCancelBtn" class="btn btn-secondary file-modal-btn">Cancel</button>
+                <button id="renameConfirmBtn" class="btn file-modal-btn">Rename</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Modal -->
+    <div id="deleteModal" class="file-modal-overlay" style="display:none;">
+        <div class="file-modal">
+            <h3 class="file-modal-title">Delete File</h3>
+            <p class="file-modal-text">Are you sure you want to delete <strong id="deleteFileName"></strong>? This cannot be undone.</p>
+            <div class="file-modal-actions">
+                <button id="deleteCancelBtn" class="btn btn-secondary file-modal-btn">Cancel</button>
+                <button id="deleteConfirmBtn" class="btn file-modal-btn file-modal-btn-danger">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create File Modal -->
+    <div id="createFileModal" class="file-modal-overlay" style="display:none;">
+        <div class="file-modal">
+            <h3 class="file-modal-title">Create New File</h3>
+            <input type="text" id="createFileInput" class="form-control file-modal-input" placeholder="e.g., utils.js" autocomplete="off">
+            <div class="file-modal-actions">
+                <button id="createFileCancelBtn" class="btn btn-secondary file-modal-btn">Cancel</button>
+                <button id="createFileConfirmBtn" class="btn file-modal-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Draggable Video Container -->
     <div id="videoContainer" style="display: none;">
         <div id="videoHeader">
@@ -256,10 +292,123 @@
             for (const filename in roomFiles) {
                 const li = document.createElement("li");
                 li.className = "file-item" + (filename === currentFile ? " active" : "");
-                li.textContent = filename;
-                li.onclick = () => switchFile(filename);
+
+                const nameSpan = document.createElement("span");
+                nameSpan.className = "file-item-name";
+                nameSpan.textContent = filename;
+                nameSpan.onclick = () => switchFile(filename);
+
+                const menuWrapper = document.createElement("div");
+                menuWrapper.className = "file-menu-wrapper";
+
+                const menuBtn = document.createElement("button");
+                menuBtn.className = "file-menu-btn";
+                menuBtn.innerHTML = "⋮";
+                menuBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    closeAllFileMenus();
+                    const dropdown = menuWrapper.querySelector(".file-menu-dropdown");
+                    dropdown.classList.toggle("open");
+                };
+
+                const dropdown = document.createElement("div");
+                dropdown.className = "file-menu-dropdown";
+
+                const renameBtn = document.createElement("div");
+                renameBtn.className = "file-menu-item";
+                renameBtn.innerHTML = "✏️ Rename";
+                renameBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    closeAllFileMenus();
+                    setTimeout(() => renameFile(filename), 50);
+                });
+
+                const deleteBtn = document.createElement("div");
+                deleteBtn.className = "file-menu-item file-menu-item-danger";
+                deleteBtn.innerHTML = "🗑️ Delete";
+                deleteBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    closeAllFileMenus();
+                    setTimeout(() => deleteFile(filename), 50);
+                });
+
+                dropdown.appendChild(renameBtn);
+                dropdown.appendChild(deleteBtn);
+                menuWrapper.appendChild(menuBtn);
+                menuWrapper.appendChild(dropdown);
+
+                li.appendChild(nameSpan);
+                li.appendChild(menuWrapper);
                 fileList.appendChild(li);
             }
+        }
+
+        function closeAllFileMenus() {
+            document.querySelectorAll(".file-menu-dropdown.open").forEach(d => d.classList.remove("open"));
+        }
+
+        // Close menus when clicking elsewhere
+        document.addEventListener("click", () => closeAllFileMenus());
+
+        function renameFile(oldName) {
+            const modal = document.getElementById("renameModal");
+            const input = document.getElementById("renameInput");
+            const confirmBtn = document.getElementById("renameConfirmBtn");
+            const cancelBtn = document.getElementById("renameCancelBtn");
+
+            input.value = oldName;
+            modal.style.display = "flex";
+            setTimeout(() => { input.focus(); input.select(); }, 100);
+
+            // Clone to remove old listeners
+            const newConfirm = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+            const newCancel = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+            newCancel.addEventListener("click", () => { modal.style.display = "none"; });
+            modal.addEventListener("click", (e) => { if (e.target === modal) modal.style.display = "none"; });
+            input.addEventListener("keydown", (e) => { if (e.key === "Enter") newConfirm.click(); if (e.key === "Escape") modal.style.display = "none"; });
+
+            newConfirm.addEventListener("click", () => {
+                const newName = input.value.trim();
+                modal.style.display = "none";
+                if (newName && newName !== oldName && !roomFiles[newName]) {
+                    socket.emit("file-renamed", { oldName, newName });
+                } else if (newName && roomFiles[newName]) {
+                    alert("A file with that name already exists.");
+                }
+            });
+        }
+
+        function deleteFile(filename) {
+            const fileCount = Object.keys(roomFiles).length;
+            if (fileCount <= 1) {
+                alert("Cannot delete the last file.");
+                return;
+            }
+
+            const modal = document.getElementById("deleteModal");
+            document.getElementById("deleteFileName").textContent = filename;
+            modal.style.display = "flex";
+
+            const confirmBtn = document.getElementById("deleteConfirmBtn");
+            const cancelBtn = document.getElementById("deleteCancelBtn");
+
+            const newConfirm = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+            const newCancel = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+            newCancel.addEventListener("click", () => { modal.style.display = "none"; });
+            modal.addEventListener("click", (e) => { if (e.target === modal) modal.style.display = "none"; });
+
+            newConfirm.addEventListener("click", () => {
+                modal.style.display = "none";
+                socket.emit("file-deleted", filename);
+            });
         }
 
         function switchFile(filename) {
@@ -288,10 +437,35 @@
         }
 
         document.getElementById("createFileBtn").addEventListener("click", () => {
-            const filename = prompt("Enter file name (e.g., utils.js):");
-            if (filename && !roomFiles[filename]) {
-                socket.emit("file-created", filename);
-            }
+            const modal = document.getElementById("createFileModal");
+            const input = document.getElementById("createFileInput");
+            const confirmBtn = document.getElementById("createFileConfirmBtn");
+            const cancelBtn = document.getElementById("createFileCancelBtn");
+
+            input.value = "";
+            modal.style.display = "flex";
+            setTimeout(() => input.focus(), 100);
+
+            const newConfirm = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+            const newCancel = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+            const close = () => { modal.style.display = "none"; };
+            newCancel.addEventListener("click", close);
+            modal.onclick = (e) => { if (e.target === modal) close(); };
+            input.onkeydown = (e) => {
+                if (e.key === "Enter") newConfirm.click();
+                if (e.key === "Escape") close();
+            };
+
+            newConfirm.addEventListener("click", () => {
+                const filename = input.value.trim();
+                close();
+                if (filename && !roomFiles[filename]) {
+                    socket.emit("file-created", filename);
+                }
+            });
         });
 
         document.getElementById("downloadBtn").addEventListener("click", () => {
@@ -490,6 +664,38 @@
                 socket.on("file-created", (filename) => {
                     if (!roomFiles[filename]) {
                         roomFiles[filename] = "\n";
+                        renderFileList();
+                    }
+                });
+
+                socket.on("file-renamed", ({ oldName, newName }) => {
+                    if (roomFiles[oldName] !== undefined) {
+                        roomFiles[newName] = roomFiles[oldName];
+                        delete roomFiles[oldName];
+                        if (currentFile === oldName) {
+                            currentFile = newName;
+                            const ext = newName.split('.').pop();
+                            const lang = monacoLangMap[ext] || "javascript";
+                            monaco.editor.setModelLanguage(monacoEditor.getModel(), lang);
+                            const backendLang = extToBackendLang[ext] || "javascript";
+                            languageSelect.value = backendLang;
+                        }
+                        renderFileList();
+                    }
+                });
+
+                socket.on("file-deleted", (filename) => {
+                    if (roomFiles[filename] !== undefined) {
+                        delete roomFiles[filename];
+                        if (currentFile === filename) {
+                            currentFile = Object.keys(roomFiles)[0] || "main.js";
+                            monacoEditor.setValue(roomFiles[currentFile] || "");
+                            const ext = currentFile.split('.').pop();
+                            const lang = monacoLangMap[ext] || "javascript";
+                            monaco.editor.setModelLanguage(monacoEditor.getModel(), lang);
+                            const backendLang = extToBackendLang[ext] || "javascript";
+                            languageSelect.value = backendLang;
+                        }
                         renderFileList();
                     }
                 });

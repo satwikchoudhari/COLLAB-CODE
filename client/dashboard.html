@@ -11,6 +11,31 @@
         .room-card { padding: 1.5rem; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px; cursor: pointer; transition: transform 0.2s; }
         .room-card:hover { transform: translateY(-5px); border-color: var(--accent); background: rgba(30, 41, 59, 0.9); }
         .room-card h3 { margin-bottom: 0.5rem; }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(15, 15, 20, 0.95);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255,255,255,0.12);
+            color: var(--text-main);
+            padding: 0.75rem 1.5rem;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            z-index: 10000;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
     </style>
     <script src="/router.js"></script>
 </head>
@@ -37,16 +62,96 @@
         </div>
     </div>
 
+    <!-- Create Room Modal -->
+    <div id="createRoomModal" class="file-modal-overlay" style="display:none;">
+        <div class="file-modal">
+            <h3 class="file-modal-title">Create New Room</h3>
+            <input type="text" id="createRoomInput" class="form-control file-modal-input" placeholder="Enter room name" autocomplete="off">
+            <div class="file-modal-actions">
+                <button id="createRoomCancelBtn" class="btn btn-secondary file-modal-btn">Cancel</button>
+                <button id="createRoomConfirmBtn" class="btn file-modal-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Room Modal -->
+    <div id="renameRoomModal" class="file-modal-overlay" style="display:none;">
+        <div class="file-modal">
+            <h3 class="file-modal-title">Rename Room</h3>
+            <input type="text" id="renameRoomInput" class="form-control file-modal-input" placeholder="Enter new room name" autocomplete="off">
+            <div class="file-modal-actions">
+                <button id="renameRoomCancelBtn" class="btn btn-secondary file-modal-btn">Cancel</button>
+                <button id="renameRoomConfirmBtn" class="btn file-modal-btn">Rename</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Room Modal -->
+    <div id="deleteRoomModal" class="file-modal-overlay" style="display:none;">
+        <div class="file-modal">
+            <h3 class="file-modal-title">Delete Room</h3>
+            <p class="file-modal-text">Are you sure you want to delete this room? This action <strong>cannot be undone</strong>.</p>
+            <div class="file-modal-actions">
+                <button id="deleteRoomCancelBtn" class="btn btn-secondary file-modal-btn">Cancel</button>
+                <button id="deleteRoomConfirmBtn" class="btn file-modal-btn file-modal-btn-danger">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
     <script>
     (() => {
+        // ── Modal helpers ──
+        function showModal(modalId, inputId, onConfirm, prefill = "") {
+            const modal = document.getElementById(modalId);
+            const input = inputId ? document.getElementById(inputId) : null;
+            const confirmBtn = modal.querySelector("[id$='ConfirmBtn']");
+            const cancelBtn = modal.querySelector("[id$='CancelBtn']");
+
+            if (input) { input.value = prefill; }
+            modal.style.display = "flex";
+            if (input) setTimeout(() => { input.focus(); input.select(); }, 100);
+
+            // Clone buttons to clear old listeners
+            const newConfirm = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+            const newCancel = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+            const close = () => { modal.style.display = "none"; };
+
+            newCancel.addEventListener("click", close);
+            modal.onclick = (e) => { if (e.target === modal) close(); };
+            if (input) {
+                input.onkeydown = (e) => {
+                    if (e.key === "Enter") newConfirm.click();
+                    if (e.key === "Escape") close();
+                };
+            }
+
+            newConfirm.addEventListener("click", () => {
+                const value = input ? input.value.trim() : null;
+                close();
+                onConfirm(value);
+            });
+        }
+
+        function showToast(message, duration = 2500) {
+            const toast = document.getElementById("toast");
+            toast.textContent = message;
+            toast.classList.add("show");
+            setTimeout(() => toast.classList.remove("show"), duration);
+        }
+
+        // ── Dashboard logic ──
         async function init() {
-            // Check auth
             const authRes = await fetch("/api/auth/me");
             const authData = await authRes.json();
             if (!authData.loggedIn) { window.location.href = "/login"; return; }
             document.getElementById("usernameDisplay").textContent = `${authData.username}`;
 
-            // Load rooms
             const roomRes = await fetch("/api/rooms");
             const rooms = await roomRes.json();
             const grid = document.getElementById("roomGrid");
@@ -65,9 +170,9 @@
                         <p class="text-muted mt-2" style="font-size: 0.85rem; text-transform: capitalize;">Lang: ${room.language}</p>
                         <button class="menu-btn" title="Options">⋮</button>
                         <div class="context-menu" id="menu-${room.roomId}">
-                            <div class="context-menu-item" onclick="renameRoom(event, '${room.roomId}')">Rename</div>
-                            <div class="context-menu-item" onclick="shareRoom(event, '${room.roomId}')">Share Link</div>
-                            <div class="context-menu-item danger" onclick="deleteRoom(event, '${room.roomId}')">Delete Room</div>
+                            <div class="context-menu-item" data-action="rename">Rename</div>
+                            <div class="context-menu-item" data-action="share">Share Link</div>
+                            <div class="context-menu-item danger" data-action="delete">Delete Room</div>
                         </div>
                     `;
                     
@@ -82,7 +187,6 @@
                     
                     menuBtn.onclick = (e) => {
                         e.stopPropagation();
-                        // close all other menus and reset their z-index
                         document.querySelectorAll('.context-menu').forEach(m => {
                             if (m !== menu) {
                                 m.classList.remove('active');
@@ -93,59 +197,66 @@
                         card.style.zIndex = menu.classList.contains('active') ? '50' : '1';
                     };
 
+                    // Context menu actions
+                    card.querySelector('[data-action="rename"]').onclick = (e) => {
+                        e.stopPropagation();
+                        menu.classList.remove('active');
+                        showModal("renameRoomModal", "renameRoomInput", async (newName) => {
+                            if (newName) {
+                                await fetch(`/api/rooms/${room.roomId}`, {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ name: newName })
+                                });
+                                init();
+                            }
+                        }, room.name);
+                    };
+
+                    card.querySelector('[data-action="share"]').onclick = (e) => {
+                        e.stopPropagation();
+                        menu.classList.remove('active');
+                        card.style.zIndex = '1';
+                        const link = window.location.origin + `/room/${room.roomId}`;
+                        navigator.clipboard.writeText(link);
+                        showToast("✓ Link copied to clipboard!");
+                    };
+
+                    card.querySelector('[data-action="delete"]').onclick = (e) => {
+                        e.stopPropagation();
+                        menu.classList.remove('active');
+                        showModal("deleteRoomModal", null, async () => {
+                            await fetch(`/api/rooms/${room.roomId}`, { method: "DELETE" });
+                            init();
+                        });
+                    };
+
                     grid.appendChild(card);
                 });
             }
         }
 
-        window.renameRoom = async (e, roomId) => {
-            e.stopPropagation();
-            const newName = prompt("Enter new room name:");
-            if (newName) {
-                await fetch(`/api/rooms/${roomId}`, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name: newName })
-                });
-                init(); // Reload dashboard
-            }
-        };
-
-        window.deleteRoom = async (e, roomId) => {
-            e.stopPropagation();
-            if (confirm("Are you sure you want to delete this room? This action cannot be undone.")) {
-                await fetch(`/api/rooms/${roomId}`, { method: "DELETE" });
-                init(); // Reload dashboard
-            }
-        };
-
-        window.shareRoom = (e, roomId) => {
-            e.stopPropagation();
-            const link = window.location.origin + `/room/${roomId}`;
-            navigator.clipboard.writeText(link);
-            alert("Link copied to clipboard!");
-            document.querySelectorAll('.context-menu').forEach(m => m.classList.remove('active'));
-        };
-
         // Close menu when clicking outside
         document.addEventListener('click', () => {
             document.querySelectorAll('.context-menu').forEach(m => {
                 m.classList.remove('active');
-                m.closest('.room-card').style.zIndex = '1';
+                const card = m.closest('.room-card');
+                if (card) card.style.zIndex = '1';
             });
         });
         
-        document.getElementById("createRoomBtn").addEventListener("click", async () => {
-            const name = prompt("Enter room name:");
-            if (name) {
-                const res = await fetch("/api/rooms", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name })
-                });
-                const room = await res.json();
-                window.location.href = `/room/${room.roomId}`;
-            }
+        document.getElementById("createRoomBtn").addEventListener("click", () => {
+            showModal("createRoomModal", "createRoomInput", async (name) => {
+                if (name) {
+                    const res = await fetch("/api/rooms", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ name })
+                    });
+                    const room = await res.json();
+                    window.location.href = `/room/${room.roomId}`;
+                }
+            });
         });
 
         document.getElementById("logoutBtn").addEventListener("click", async () => {
@@ -158,3 +269,4 @@
     </script>
 </body>
 </html>
+

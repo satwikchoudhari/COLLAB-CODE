@@ -1,4 +1,6 @@
 require("dotenv").config();
+const dns = require("dns");
+dns.setServers(["8.8.8.8", "8.8.4.4"]); // Use Google DNS for MongoDB Atlas SRV resolution
 const mongoose = require("mongoose");
 const express = require("express");
 const http = require("http");
@@ -87,6 +89,34 @@ io.on("connection", (socket) => {
                     await r.save();
                     io.to(roomId).emit("file-created", filename); // Broadcast creation
                 }
+            }
+        });
+
+        socket.on("file-renamed", async ({ oldName, newName }) => {
+            if (!oldName || !newName || oldName === newName) return;
+            let r = await Room.findOne({ roomId });
+            if (r) {
+                // Check new name doesn't already exist
+                if (r.files.find(f => f.name === newName)) return;
+                let fileItem = r.files.find(f => f.name === oldName);
+                if (fileItem) {
+                    fileItem.name = newName;
+                    await r.save();
+                    io.to(roomId).emit("file-renamed", { oldName, newName });
+                }
+            }
+        });
+
+        socket.on("file-deleted", async (filename) => {
+            if (!filename) return;
+            let r = await Room.findOne({ roomId });
+            if (r) {
+                r.files = r.files.filter(f => f.name !== filename);
+                if (r.files.length === 0) {
+                    r.files.push({ name: "main.js", content: "\n" });
+                }
+                await r.save();
+                io.to(roomId).emit("file-deleted", filename);
             }
         });
 
@@ -209,6 +239,7 @@ io.on("connection", (socket) => {
     });
 });
 
-server.listen(3000, () => {
-    console.log("Server running on port 3000");
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
