@@ -21,7 +21,7 @@ mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/collab-edit
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static("client"));
+app.use(express.static(path.join(__dirname, "../client")));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomRoutes);
