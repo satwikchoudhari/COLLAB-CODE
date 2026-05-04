@@ -12,6 +12,7 @@
         .room-card:hover { transform: translateY(-5px); border-color: var(--accent); background: rgba(30, 41, 59, 0.9); }
         .room-card h3 { margin-bottom: 0.5rem; }
     </style>
+    <script src="/router.js"></script>
 </head>
 <body>
     <div class="bg-blobs">
@@ -37,6 +38,7 @@
     </div>
 
     <script>
+    (() => {
         async function init() {
             // Check auth
             const authRes = await fetch("/api/auth/me");
@@ -56,12 +58,82 @@
                 rooms.forEach(room => {
                     const card = document.createElement("div");
                     card.className = "room-card glass-panel";
-                    card.innerHTML = `<h3>${room.name}</h3><p class="text-muted">ID: ${room.roomId}</p><p class="text-muted mt-2" style="font-size: 0.85rem; text-transform: capitalize;">Lang: ${room.language}</p>`;
-                    card.onclick = () => window.location.href = `/room/${room.roomId}`;
+                    
+                    card.innerHTML = `
+                        <h3>${room.name}</h3>
+                        <p class="text-muted">ID: ${room.roomId}</p>
+                        <p class="text-muted mt-2" style="font-size: 0.85rem; text-transform: capitalize;">Lang: ${room.language}</p>
+                        <button class="menu-btn" title="Options">⋮</button>
+                        <div class="context-menu" id="menu-${room.roomId}">
+                            <div class="context-menu-item" onclick="renameRoom(event, '${room.roomId}')">Rename</div>
+                            <div class="context-menu-item" onclick="shareRoom(event, '${room.roomId}')">Share Link</div>
+                            <div class="context-menu-item danger" onclick="deleteRoom(event, '${room.roomId}')">Delete Room</div>
+                        </div>
+                    `;
+                    
+                    card.onclick = (e) => {
+                        if (!e.target.closest('.context-menu') && !e.target.closest('.menu-btn')) {
+                            window.location.href = `/room/${room.roomId}`;
+                        }
+                    };
+
+                    const menuBtn = card.querySelector('.menu-btn');
+                    const menu = card.querySelector('.context-menu');
+                    
+                    menuBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        // close all other menus and reset their z-index
+                        document.querySelectorAll('.context-menu').forEach(m => {
+                            if (m !== menu) {
+                                m.classList.remove('active');
+                                m.closest('.room-card').style.zIndex = '1';
+                            }
+                        });
+                        menu.classList.toggle('active');
+                        card.style.zIndex = menu.classList.contains('active') ? '50' : '1';
+                    };
+
                     grid.appendChild(card);
                 });
             }
         }
+
+        window.renameRoom = async (e, roomId) => {
+            e.stopPropagation();
+            const newName = prompt("Enter new room name:");
+            if (newName) {
+                await fetch(`/api/rooms/${roomId}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: newName })
+                });
+                init(); // Reload dashboard
+            }
+        };
+
+        window.deleteRoom = async (e, roomId) => {
+            e.stopPropagation();
+            if (confirm("Are you sure you want to delete this room? This action cannot be undone.")) {
+                await fetch(`/api/rooms/${roomId}`, { method: "DELETE" });
+                init(); // Reload dashboard
+            }
+        };
+
+        window.shareRoom = (e, roomId) => {
+            e.stopPropagation();
+            const link = window.location.origin + `/room/${roomId}`;
+            navigator.clipboard.writeText(link);
+            alert("Link copied to clipboard!");
+            document.querySelectorAll('.context-menu').forEach(m => m.classList.remove('active'));
+        };
+
+        // Close menu when clicking outside
+        document.addEventListener('click', () => {
+            document.querySelectorAll('.context-menu').forEach(m => {
+                m.classList.remove('active');
+                m.closest('.room-card').style.zIndex = '1';
+            });
+        });
         
         document.getElementById("createRoomBtn").addEventListener("click", async () => {
             const name = prompt("Enter room name:");
@@ -82,6 +154,7 @@
         });
 
         init();
+    })();
     </script>
 </body>
 </html>

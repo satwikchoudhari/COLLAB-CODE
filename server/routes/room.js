@@ -32,4 +32,25 @@ router.post("/", async (req, res) => {
     }
 });
 
+router.put("/:roomId", async (req, res) => {
+    try {
+        const { name } = req.body;
+        const room = await Room.findOneAndUpdate({ roomId: req.params.roomId }, { name }, { new: true });
+        if (!room) return res.status(404).json({ error: "Room not found" });
+        res.json(room);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+router.delete("/:roomId", async (req, res) => {
+    try {
+        const room = await Room.findOneAndDelete({ roomId: req.params.roomId });
+        if (!room) return res.status(404).json({ error: "Room not found" });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

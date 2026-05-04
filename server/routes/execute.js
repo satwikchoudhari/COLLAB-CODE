@@ -6,35 +6,37 @@ router.post("/", async (req, res) => {
     try {
         const { language, sourceCode } = req.body;
         
-        // Map our language to Wandbox compiler names
+        // Map our language to Judge0 language IDs
         const langMap = {
-            "javascript": "nodejs-20.17.0",
-            "python": "cpython-3.12.7",
-            "c": "gcc-head-c",
-            "cpp": "gcc-head",
-            "java": "openjdk-jdk-22+36"
+            "javascript": 102,
+            "python": 113,
+            "c": 103,
+            "cpp": 105,
+            "java": 91
         };
-        const compilerVal = langMap[language] || langMap["javascript"];
+        const langId = langMap[language] || 102;
 
-        const response = await axios.post("https://wandbox.org/api/compile.json", {
-            compiler: compilerVal,
-            code: sourceCode,
-            save: false
+        const response = await axios.post("https://ce.judge0.com/submissions?base64_encoded=false&wait=true", {
+            language_id: langId,
+            source_code: sourceCode
         });
 
         const data = response.data;
-        // Wandbox sends stdout and stderr as separate keys
-        const output = data.program_output || data.compiler_output || data.program_message || data.compiler_message || "";
-        const compileErr = data.compiler_error || "";
         
-        if (data.status !== "0" && !output) {
-            res.json({ error: compileErr || "Execution failed without output." });
+        const output = data.stdout || "";
+        const compileErr = data.compile_output || data.stderr || "";
+        const errorDescription = (data.status && data.status.id > 3) ? `[${data.status.description}] ` : "";
+        
+        if (data.status && data.status.id > 3 && !output && !compileErr) {
+            res.json({ error: errorDescription + "Execution failed without output." });
         } else {
-            res.json({ run: { output: compileErr ? compileErr + '\n' + output : output }, compile: { output: "" } });
+            const combinedOutput = compileErr ? errorDescription + compileErr + '\n' + output : errorDescription + output;
+            res.json({ run: { output: combinedOutput.trim() }, compile: { output: "" } });
         }
     } catch (err) {
-        console.error("Execution error:", err.message);
-        res.status(500).json({ error: err.message });
+        const apiError = err.response && err.response.data ? err.response.data : err.message;
+        console.error("Execution error:", apiError);
+        res.status(500).json({ error: `Code execution service error: ${apiError}` });
     }
 });
 

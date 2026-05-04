@@ -9,6 +9,7 @@ const cookieParser = require("cookie-parser");
 const authRoutes = require("./routes/auth");
 const roomRoutes = require("./routes/room");
 const executeRoutes = require("./routes/execute");
+const aiRoutes = require("./routes/ai");
 const Room = require("./models/Room");
 
 mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/collab-editor")
@@ -23,6 +24,7 @@ app.use(express.static("client"));
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomRoutes);
 app.use("/api/execute", executeRoutes);
+app.use("/api/ai", aiRoutes);
 
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "../client/index.html")));
 app.get("/login", (req, res) => res.sendFile(path.join(__dirname, "../client/auth.html")));
@@ -58,7 +60,7 @@ io.on("connection", (socket) => {
             filesObj["main.js"] = "\n";
         }
 
-        socket.emit("room-state", { files: filesObj, language: room.language });
+        socket.emit("room-state", { files: filesObj, language: room.language, aiChatHistory: room.aiChatHistory || [] });
         
         io.to(roomId).emit("user-count", roomUsers[roomId].length);
         io.to(roomId).emit("users-list", roomUsers[roomId].map(u => u.username));
@@ -105,6 +107,89 @@ io.on("connection", (socket) => {
 
         socket.on("console-output", (output) => {
             socket.to(roomId).emit("console-output", output);
+        });
+
+        // WebRTC Signaling Events
+        socket.on("join-video", () => {
+            socket.to(roomId).emit("user-joined-video", socket.id);
+        });
+
+        socket.on("video-offer", ({ offer, to }) => {
+            io.to(to).emit("video-offer", { offer, from: socket.id });
+        });
+
+        socket.on("video-answer", ({ answer, to }) => {
+            io.to(to).emit("video-answer", { answer, from: socket.id });
+        });
+
+        socket.on("new-ice-candidate", ({ candidate, to }) => {
+            io.to(to).emit("new-ice-candidate", { candidate, from: socket.id });
+        });
+
+        // AI Chat — Shared per-room
+        socket.on("ai-chat-message", async ({ message, code, language }) => {
+            const axios = require("axios");
+            const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+            const apiKey = process.env.GEMINI_API_KEY;
+
+            // Store user message in DB and broadcast
+            const userMsg = { role: "user", content: message, username: socket.username, timestamp: new Date() };
+            let r = await Room.findOne({ roomId });
+            if (r) {
+                if (!r.aiChatHistory) r.aiChatHistory = [];
+                r.aiChatHistory.push(userMsg);
+                await r.save();
+            }
+            io.to(roomId).emit("ai-chat-message", userMsg);
+
+            if (!apiKey) {
+                const errMsg = { role: "model", content: "⚠️ GEMINI_API_KEY is not configured on the server.", username: "AI", timestamp: new Date() };
+                io.to(roomId).emit("ai-chat-response", errMsg);
+                return;
+            }
+
+            // Build Gemini request with history
+            const systemContext = "You are an expert coding assistant inside CollabCode, a real-time collaborative editor. Keep responses concise with Markdown formatting. Wrap code in fenced code blocks with language identifiers. Be friendly and precise.";
+            const contents = [];
+            const history = (r ? r.aiChatHistory : []).filter(m => m.role === "user" || m.role === "model");
+
+            // Build alternating user/model turns for Gemini
+            history.forEach((msg, i) => {
+                if (msg === userMsg) return; // skip current one, we add it below
+                contents.push({
+                    role: msg.role === "user" ? "user" : "model",
+                    parts: [{ text: i === 0 ? systemContext + "\n\n" + msg.content : msg.content }]
+                });
+            });
+
+            let userText = contents.length === 0 ? systemContext + "\n\n" : "";
+            if (code && code.trim()) {
+                userText += `The user is editing a **${language || "unknown"}** file:\n\n\`\`\`${language || ""}\n${code}\n\`\`\`\n\n`;
+            }
+            userText += message;
+            contents.push({ role: "user", parts: [{ text: userText }] });
+
+            try {
+                const response = await axios.post(`${GEMINI_API_URL}?key=${apiKey}`, {
+                    contents,
+                    generationConfig: { temperature: 0.7, maxOutputTokens: 4096, topP: 0.95, topK: 40 }
+                }, { headers: { "Content-Type": "application/json" }, timeout: 30000 });
+
+                const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || "No response from AI.";
+                const botMsg = { role: "model", content: reply, username: "AI", timestamp: new Date() };
+
+                r = await Room.findOne({ roomId });
+                if (r) {
+                    r.aiChatHistory.push(botMsg);
+                    await r.save();
+                }
+                io.to(roomId).emit("ai-chat-response", botMsg);
+            } catch (err) {
+                console.error("AI Socket Error:", err.response?.data || err.message);
+                const errContent = err.response?.status === 429 ? "⚠️ Rate limit exceeded. Please wait and try again." : "⚠️ Failed to get AI response.";
+                const errMsg = { role: "model", content: errContent, username: "AI", timestamp: new Date() };
+                io.to(roomId).emit("ai-chat-response", errMsg);
+            }
         });
     });
 

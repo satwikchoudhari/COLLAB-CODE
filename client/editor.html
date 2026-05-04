@@ -45,7 +45,53 @@
             pointer-events: none;
             opacity: 0.9;
         }
+
+        /* Video Container Styling */
+        #videoContainer {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 350px;
+            height: 250px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            resize: both;
+        }
+        #videoHeader {
+            padding: 0.5rem;
+            background: #111;
+            border-bottom: 1px solid var(--glass-border);
+            cursor: grab;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            color: #ccc;
+        }
+        #videoHeader:active {
+            cursor: grabbing;
+        }
+        #videoIframe {
+            flex: 1;
+            border: none;
+            width: 100%;
+            height: 100%;
+        }
+        .close-btn {
+            background: none;
+            border: none;
+            color: #ef4444;
+            cursor: pointer;
+            font-weight: bold;
+        }
     </style>
+    <script src="/router.js"></script>
 </head>
 <body>
     <nav class="navbar" style="padding: 1rem 2rem;">
@@ -55,6 +101,7 @@
             <span id="roomNameDisplay" style="font-weight: 600;">Room Loading...</span>
         </div>
         <div class="nav-links flex gap-4 align-center">
+            <button id="joinVideoBtn" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Join Video Call">🎥 Join Video</button>
             <select id="languageSelect" class="form-control" style="width: auto; padding: 0.5rem;" disabled title="Language is auto-detected from file extension">
                 <option value="javascript">JavaScript</option>
                 <option value="python">Python</option>
@@ -64,6 +111,7 @@
             </select>
             <button id="downloadBtn" class="btn btn-secondary" style="padding: 0.5rem 1rem;" title="Download Current File">⬇️ Download</button>
             <button id="runBtn" class="btn" style="padding: 0.5rem 1rem;">Run Code</button>
+            <button id="aiToggleBtn" class="btn btn-secondary ai-toggle-btn" style="padding: 0.5rem 1rem;" title="AI Assistant">✨ AI</button>
         </div>
     </nav>
 
@@ -91,7 +139,7 @@
             </div>
         </div>
 
-        <div class="main-pane">
+        <div class="main-pane" style="position: relative; overflow: hidden;">
             <div id="editor"></div>
             
             <div class="terminal-panel">
@@ -101,6 +149,56 @@
                 </div>
                 <div class="terminal-output" id="terminalOutput">System ready. Awaiting execution.</div>
             </div>
+
+            <!-- AI Assistant Panel -->
+            <div class="ai-panel" id="aiPanel">
+                <div class="ai-panel-header">
+                    <div class="ai-panel-title">
+                        <div class="ai-icon">✦</div>
+                        <span>AI Assistant</span>
+                    </div>
+                    <button class="ai-close-btn" id="aiCloseBtn" title="Close">✕</button>
+                </div>
+                <div class="ai-chat-messages" id="aiChatMessages">
+                    <div class="ai-welcome" id="aiWelcome">
+                        <span class="ai-welcome-icon">✦</span>
+                        <h4>CollabCode AI</h4>
+                        <p>Ask me anything about your code — explanations, debugging, refactoring, or suggestions.</p>
+                        <div class="ai-suggestion-chips">
+                            <span class="ai-chip" data-prompt="Explain this code">Explain this code</span>
+                            <span class="ai-chip" data-prompt="Find bugs in my code">Find bugs</span>
+                            <span class="ai-chip" data-prompt="Refactor this code to be cleaner">Refactor</span>
+                            <span class="ai-chip" data-prompt="Add comments to this code">Add comments</span>
+                            <span class="ai-chip" data-prompt="Write unit tests for this code">Write tests</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="ai-input-area">
+                    <label class="ai-context-toggle">
+                        <input type="checkbox" id="aiContextToggle" checked>
+                        <span>Include current file as context</span>
+                    </label>
+                    <div class="ai-input-row">
+                        <textarea class="ai-input" id="aiInput" placeholder="Ask AI anything..." rows="1"></textarea>
+                        <button class="ai-send-btn" id="aiSendBtn" title="Send">➤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Draggable Video Container -->
+    <div id="videoContainer" style="display: none;">
+        <div id="videoHeader">
+            <span>⋮⋮ Video Call</span>
+            <div style="display: flex; gap: 10px;">
+                <button id="toggleAudioBtn" class="btn btn-secondary" style="padding: 0 5px; font-size: 12px; border: none; background: transparent;" title="Toggle Mute">🎤</button>
+                <button id="toggleVideoBtn" class="btn btn-secondary" style="padding: 0 5px; font-size: 12px; border: none; background: transparent;" title="Toggle Video">📷</button>
+                <button class="close-btn" onclick="leaveVideoCall()" title="Leave Video">✖</button>
+            </div>
+        </div>
+        <div id="videoGrid" style="flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 5px; padding: 5px; overflow-y: auto; background: #000;">
+            <!-- Videos will be injected here -->
         </div>
     </div>
 
@@ -109,6 +207,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
 
     <script>
+    (() => {
         const socket = io();
         const roomId = window.location.pathname.split("/")[2];
         let username = "Anonymous";
@@ -218,9 +317,17 @@
                     const filename = f.name;
                     if (!roomFiles[filename]) {
                         socket.emit("file-created", filename);
-                        setTimeout(() => socket.emit("code-change", { filename, content }), 200);
+                        setTimeout(() => {
+                            socket.emit("code-change", { filename, content });
+                            roomFiles[filename] = content;
+                            renderFileList();
+                            switchFile(filename);
+                        }, 200);
                     } else {
                         socket.emit("code-change", { filename, content });
+                        roomFiles[filename] = content;
+                        renderFileList();
+                        switchFile(filename);
                     }
                 };
                 reader.readAsText(f);
@@ -244,7 +351,7 @@
                 }
             } catch(e) {}
 
-            socket.emit("join-room", { roomId, username });
+
 
             require.config({ paths: { "vs": "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs" }});
             require(["vs/editor/editor.main"], function() {
@@ -256,6 +363,22 @@
                     fontSize: 15,
                     minimap: { enabled: false }
                 });
+
+                // Expose Monaco helpers for AI assistant
+                window.getMonacoValue = () => monacoEditor ? monacoEditor.getValue() : '';
+                window.getCurrentLanguage = () => {
+                    const ext = currentFile.split('.').pop();
+                    return extToBackendLang[ext] || 'javascript';
+                };
+                window.insertAtCursor = (code) => {
+                    if (!monacoEditor) return;
+                    const position = monacoEditor.getPosition();
+                    monacoEditor.executeEdits('ai-insert', [{
+                        range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+                        text: code
+                    }]);
+                    monacoEditor.focus();
+                };
 
                 let isUpdating = false;
 
@@ -357,6 +480,11 @@
                     const ext = currentFile.split('.').pop();
                     monaco.editor.setModelLanguage(monacoEditor.getModel(), monacoLangMap[ext] || "javascript");
                     renderFileList();
+
+                    // Load persisted AI chat history
+                    if (data.aiChatHistory && data.aiChatHistory.length > 0 && window.loadAiChatHistory) {
+                        window.loadAiChatHistory(data.aiChatHistory);
+                    }
                 });
 
                 socket.on("file-created", (filename) => {
@@ -365,6 +493,9 @@
                         renderFileList();
                     }
                 });
+
+                // Emit join-room ONLY AFTER all editor listeners are attached
+                socket.emit("join-room", { roomId, username });
             });
 
             socket.on("user-count", c => document.getElementById("userCount").textContent = c);
@@ -429,9 +560,423 @@
                     appendOutput("Execution failed.", "error");
                 }
             });
+
+            // WebRTC Logic
+            const videoContainer = document.getElementById("videoContainer");
+            const videoGrid = document.getElementById("videoGrid");
+            const joinVideoBtn = document.getElementById("joinVideoBtn");
+            const toggleAudioBtn = document.getElementById("toggleAudioBtn");
+            const toggleVideoBtn = document.getElementById("toggleVideoBtn");
+            
+            let localStream;
+            const peers = {}; // socket.id -> RTCPeerConnection
+            const configuration = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+            
+            joinVideoBtn.addEventListener("click", async () => {
+                videoContainer.style.display = "flex";
+                joinVideoBtn.style.display = "none";
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    addVideoStream("localVideo", localStream, true);
+                    socket.emit("join-video");
+                } catch(err) {
+                    console.error("Failed to get local stream", err);
+                    alert("Could not access camera/microphone.");
+                    leaveVideoCall();
+                }
+            });
+
+            function leaveVideoCall() {
+                videoContainer.style.display = "none";
+                joinVideoBtn.style.display = "inline-block";
+                if(localStream) {
+                    localStream.getTracks().forEach(t => t.stop());
+                    localStream = null;
+                }
+                videoGrid.innerHTML = "";
+                for(let id in peers) {
+                    peers[id].close();
+                    delete peers[id];
+                }
+            }
+            window.leaveVideoCall = leaveVideoCall;
+
+            toggleAudioBtn.addEventListener("click", () => {
+                if(localStream) {
+                    const audioTrack = localStream.getAudioTracks()[0];
+                    if(audioTrack) {
+                        audioTrack.enabled = !audioTrack.enabled;
+                        toggleAudioBtn.style.opacity = audioTrack.enabled ? "1" : "0.5";
+                    }
+                }
+            });
+
+            toggleVideoBtn.addEventListener("click", () => {
+                if(localStream) {
+                    const videoTrack = localStream.getVideoTracks()[0];
+                    if(videoTrack) {
+                        videoTrack.enabled = !videoTrack.enabled;
+                        toggleVideoBtn.style.opacity = videoTrack.enabled ? "1" : "0.5";
+                    }
+                }
+            });
+
+            function addVideoStream(id, stream, isLocal=false) {
+                if(document.getElementById(id)) return;
+                const video = document.createElement("video");
+                video.id = id;
+                video.srcObject = stream;
+                video.autoplay = true;
+                video.playsInline = true;
+                if(isLocal) video.muted = true; // Mute local to avoid echo
+                video.style.width = "100%";
+                video.style.height = "100%";
+                video.style.objectFit = "cover";
+                video.style.borderRadius = "4px";
+                videoGrid.appendChild(video);
+            }
+
+            function createPeerConnection(peerId) {
+                const peerConnection = new RTCPeerConnection(configuration);
+                peers[peerId] = peerConnection;
+
+                if (localStream) {
+                    localStream.getTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                    });
+                }
+
+                peerConnection.ontrack = (event) => {
+                    addVideoStream(`remoteVideo_${peerId}`, event.streams[0]);
+                };
+
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.emit("new-ice-candidate", { candidate: event.candidate, to: peerId });
+                    }
+                };
+                
+                peerConnection.oniceconnectionstatechange = () => {
+                    if(peerConnection.iceConnectionState === 'disconnected' || peerConnection.iceConnectionState === 'closed' || peerConnection.iceConnectionState === 'failed') {
+                        const vid = document.getElementById(`remoteVideo_${peerId}`);
+                        if(vid) vid.remove();
+                        delete peers[peerId];
+                    }
+                };
+
+                return peerConnection;
+            }
+
+            socket.on("user-joined-video", async (peerId) => {
+                if (!localStream) return; // Haven't joined video yet
+                const peerConnection = createPeerConnection(peerId);
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                socket.emit("video-offer", { offer, to: peerId });
+            });
+
+            socket.on("video-offer", async ({ offer, from }) => {
+                if (!localStream) return;
+                const peerConnection = createPeerConnection(from);
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                socket.emit("video-answer", { answer, to: from });
+            });
+
+            socket.on("video-answer", async ({ answer, from }) => {
+                const peerConnection = peers[from];
+                if (peerConnection) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                }
+            });
+
+            socket.on("new-ice-candidate", async ({ candidate, from }) => {
+                const peerConnection = peers[from];
+                if (peerConnection) {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                }
+            });
+
+            // Make the video container draggable
+            const videoHeader = document.getElementById("videoHeader");
+            let isDragging = false, currentX, currentY, initialX, initialY, xOffset = 0, yOffset = 0;
+
+            videoHeader.addEventListener("mousedown", dragStart);
+            document.addEventListener("mouseup", dragEnd);
+            document.addEventListener("mousemove", drag);
+
+            function dragStart(e) {
+                initialX = e.clientX - xOffset;
+                initialY = e.clientY - yOffset;
+                if (e.target === videoHeader || e.target.parentNode === videoHeader && e.target.tagName !== 'BUTTON') {
+                    isDragging = true;
+                }
+            }
+
+            function dragEnd(e) {
+                initialX = currentX;
+                initialY = currentY;
+                isDragging = false;
+            }
+
+            function drag(e) {
+                if (isDragging) {
+                    e.preventDefault();
+                    currentX = e.clientX - initialX;
+                    currentY = e.clientY - initialY;
+                    xOffset = currentX;
+                    yOffset = currentY;
+                    
+                    // Add boundaries so it doesn't go off-screen easily
+                    const rect = videoContainer.getBoundingClientRect();
+                    const maxRight = window.innerWidth - rect.width;
+                    const maxBottom = window.innerHeight - rect.height;
+                    
+                    // Actually, translate is relative to starting position (bottom: 20px, right: 20px).
+                    // This simple transform implementation lets the user drag it anywhere.
+                    videoContainer.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+                }
+            }
         }
 
         init();
+
+        // ─── AI Assistant Logic (Shared per-room via Socket.IO) ───
+        (function initAIAssistant() {
+            const aiPanel = document.getElementById('aiPanel');
+            const aiToggleBtn = document.getElementById('aiToggleBtn');
+            const aiCloseBtn = document.getElementById('aiCloseBtn');
+            const aiInput = document.getElementById('aiInput');
+            const aiSendBtn = document.getElementById('aiSendBtn');
+            const aiChatMessages = document.getElementById('aiChatMessages');
+            const aiContextToggle = document.getElementById('aiContextToggle');
+            const aiWelcome = document.getElementById('aiWelcome');
+
+            let isAiLoading = false;
+
+            // Toggle panel
+            aiToggleBtn.addEventListener('click', () => {
+                aiPanel.classList.toggle('open');
+                if (aiPanel.classList.contains('open')) {
+                    setTimeout(() => aiInput.focus(), 400);
+                }
+            });
+            aiCloseBtn.addEventListener('click', () => {
+                aiPanel.classList.remove('open');
+            });
+
+            // Suggestion chips
+            document.querySelectorAll('.ai-chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    aiInput.value = chip.dataset.prompt;
+                    sendAiMessage();
+                });
+            });
+
+            // Send on Enter (Shift+Enter for newline)
+            aiInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendAiMessage();
+                }
+            });
+
+            // Auto-resize textarea
+            aiInput.addEventListener('input', () => {
+                aiInput.style.height = 'auto';
+                aiInput.style.height = Math.min(aiInput.scrollHeight, 120) + 'px';
+            });
+
+            aiSendBtn.addEventListener('click', sendAiMessage);
+
+            function sendAiMessage() {
+                const message = aiInput.value.trim();
+                if (!message || isAiLoading) return;
+
+                // Clear input
+                aiInput.value = '';
+                aiInput.style.height = 'auto';
+
+                // Show typing indicator
+                isAiLoading = true;
+                aiSendBtn.disabled = true;
+
+                // Get editor context
+                let code = '';
+                let language = '';
+                if (aiContextToggle.checked && window.getMonacoValue) {
+                    code = window.getMonacoValue();
+                    language = window.getCurrentLanguage ? window.getCurrentLanguage() : '';
+                }
+
+                // Emit to server via socket — server will broadcast to all room users
+                socket.emit('ai-chat-message', { message, code, language });
+            }
+
+            // Receive user message broadcast (from any user in room)
+            socket.on('ai-chat-message', (msg) => {
+                if (aiWelcome) aiWelcome.style.display = 'none';
+                appendMessage('user', msg.content, msg.username);
+                // Show typing indicator for AI response
+                if (!document.getElementById('aiTypingIndicator')) {
+                    showTypingIndicator();
+                }
+            });
+
+            // Receive AI response broadcast
+            socket.on('ai-chat-response', (msg) => {
+                // Remove typing indicator
+                const typingEl = document.getElementById('aiTypingIndicator');
+                if (typingEl) typingEl.remove();
+                
+                appendMessage('bot', msg.content, 'AI');
+                isAiLoading = false;
+                aiSendBtn.disabled = false;
+            });
+
+            // Load persisted chat history on room join
+            window.loadAiChatHistory = function(history) {
+                if (!history || history.length === 0) return;
+                aiWelcome.style.display = 'none';
+                history.forEach(msg => {
+                    const role = msg.role === 'user' ? 'user' : 'bot';
+                    appendMessage(role, msg.content, msg.username || (role === 'user' ? 'User' : 'AI'));
+                });
+            };
+
+            function appendMessage(role, content, senderName) {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `ai-msg ai-msg-${role === 'user' ? 'user' : 'bot'}`;
+
+                const avatar = document.createElement('div');
+                avatar.className = 'ai-msg-avatar';
+                avatar.textContent = role === 'user' ? '👤' : '✦';
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'ai-msg-content';
+
+                // Show sender name
+                if (senderName) {
+                    const nameEl = document.createElement('div');
+                    nameEl.style.cssText = 'font-size:0.72rem;color:#64748b;margin-bottom:3px;font-weight:500;';
+                    nameEl.textContent = senderName;
+                    contentDiv.appendChild(nameEl);
+                }
+
+                const bubble = document.createElement('div');
+                bubble.className = 'ai-msg-bubble';
+
+                if (role === 'user') {
+                    bubble.textContent = content;
+                } else {
+                    bubble.innerHTML = renderMarkdown(content);
+                    // Attach insert-code button listeners
+                    bubble.querySelectorAll('.ai-insert-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const code = btn.closest('.ai-code-wrapper').querySelector('.ai-code-block').textContent;
+                            insertCodeToEditor(code);
+                        });
+                    });
+                    // Attach copy-code button listeners
+                    bubble.querySelectorAll('.ai-copy-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            const code = btn.closest('.ai-code-wrapper').querySelector('.ai-code-block').textContent;
+                            navigator.clipboard.writeText(code);
+                            btn.textContent = '✓ Copied';
+                            setTimeout(() => btn.textContent = 'Copy', 1500);
+                        });
+                    });
+                }
+
+                contentDiv.appendChild(bubble);
+                msgDiv.appendChild(avatar);
+                msgDiv.appendChild(contentDiv);
+                aiChatMessages.appendChild(msgDiv);
+                aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+            }
+
+            function showTypingIndicator() {
+                const el = document.createElement('div');
+                el.className = 'ai-msg ai-msg-bot';
+                el.id = 'aiTypingIndicator';
+                el.innerHTML = `
+                    <div class="ai-msg-avatar">✦</div>
+                    <div class="ai-msg-content">
+                        <div class="ai-typing">
+                            <div class="ai-typing-dots"><span></span><span></span><span></span></div>
+                            <span class="ai-typing-text">Thinking...</span>
+                        </div>
+                    </div>
+                `;
+                aiChatMessages.appendChild(el);
+                aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+                return el;
+            }
+
+            function renderMarkdown(text) {
+                // Escape HTML
+                let html = text
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+
+                // Fenced code blocks: ```lang\n...\n```
+                html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+                    const displayLang = lang || 'code';
+                    return `<div class="ai-code-wrapper">
+                        <div class="ai-code-header">
+                            <span>${displayLang}</span>
+                            <div class="ai-code-actions">
+                                <button class="ai-copy-btn">Copy</button>
+                                <button class="ai-insert-btn">Insert ↵</button>
+                            </div>
+                        </div>
+                        <pre class="ai-code-block">${code.trim()}</pre>
+                    </div>`;
+                });
+
+                // Inline code: `code`
+                html = html.replace(/`([^`]+)`/g, '<code class="ai-inline-code">$1</code>');
+
+                // Bold: **text**
+                html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+                // Italic: *text*
+                html = html.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+
+                // Unordered lists
+                html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+                html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+
+                // Ordered lists
+                html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+                // Headers
+                html = html.replace(/^### (.+)$/gm, '<strong style="font-size:0.95em;display:block;margin:0.5rem 0 0.25rem;">$1</strong>');
+                html = html.replace(/^## (.+)$/gm, '<strong style="font-size:1em;display:block;margin:0.6rem 0 0.3rem;">$1</strong>');
+                html = html.replace(/^# (.+)$/gm, '<strong style="font-size:1.05em;display:block;margin:0.7rem 0 0.35rem;">$1</strong>');
+
+                // Paragraphs (double newlines)
+                html = html.replace(/\n\n/g, '</p><p>');
+                html = '<p>' + html + '</p>';
+
+                // Single newlines within paragraphs
+                html = html.replace(/(?<!<\/(li|ul|ol|pre|div|p)>)\n(?!<)/g, '<br>');
+
+                // Clean up empty paragraphs
+                html = html.replace(/<p><\/p>/g, '');
+
+                return html;
+            }
+
+            function insertCodeToEditor(code) {
+                if (window.insertAtCursor) {
+                    window.insertAtCursor(code);
+                }
+            }
+        })();
+    })();
     </script>
 </body>
 </html>
